@@ -18,6 +18,13 @@ python3 -m venv .venv
 python -m pip install -e ".[packaging]"
 ```
 
+## Install from PyPI
+
+```bash
+pip install "codex-limit[app]"
+codex-limit
+```
+
 ## Run
 
 ```bash
@@ -36,10 +43,27 @@ open dist/CodexLimit.app
 ```
 
 The bundle is configured as a menu-bar-only accessory app and should not show a
-Dock icon.
+Dock icon. The app icon is generated from `assets/CodexLimit.icns`.
+
+## Install Locally
+
+```bash
+scripts/install.sh
+```
+
+The installer builds `dist/CodexLimit.app`, stops any running copy, installs to
+`/Applications` when writable or `~/Applications` otherwise, and launches the
+app. Use `scripts/install.sh --user` to force `~/Applications`, or
+`scripts/install.sh --no-open` to install without launching.
 
 ## Test
 
 ```bash
 python -m unittest discover -s tests
 ```
+
+## Release
+
+Publishing uses the same trusted-publishing workflow as `codexapi`: create a
+GitHub release or push a `v*` tag, and `.github/workflows/publish.yml` builds
+and publishes the package to PyPI.

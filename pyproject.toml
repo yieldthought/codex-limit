@@ -9,9 +9,26 @@ description = "macOS menu bar widget for Codex weekly limit burn rate."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["codex", "macos", "menu-bar", "quota", "rate-limit"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = []
 
 [project.optional-dependencies]
+app = [
+    "pyobjc-framework-Cocoa>=12.1; sys_platform == 'darwin'",
+]
 packaging = [
     "pyobjc-framework-Cocoa>=12.1; sys_platform == 'darwin'",
     "py2app>=0.28.9; sys_platform == 'darwin'",
@@ -19,6 +36,11 @@ packaging = [
 
 [project.scripts]
 codex-limit = "codex_limit.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/yieldthought/codex-limit"
+Repository = "https://github.com/yieldthought/codex-limit"
+Issues = "https://github.com/yieldthought/codex-limit/issues"
 
 [tool.setuptools.packages.find]
 include = ["codex_limit*"]

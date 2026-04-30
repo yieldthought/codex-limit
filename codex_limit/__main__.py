@@ -5,7 +5,7 @@ def main() -> None:
         if exc.name in {"AppKit", "Foundation", "objc"}:
             raise SystemExit(
                 "CodexLimit requires PyObjC on macOS. Install with:\n"
-                '  python -m pip install -e ".[packaging]"'
+                '  python -m pip install "codex-limit[app]"'
             ) from exc
         raise
     run()
@@ -13,4 +13,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

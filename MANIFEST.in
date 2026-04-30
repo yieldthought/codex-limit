@@ -1,0 +1,5 @@
+include CodexLimit.py
+include setup.py
+include assets/CodexLimit.icns
+include assets/CodexLimitIcon.png
+include scripts/install.sh
