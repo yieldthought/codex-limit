@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-limit"
-version = "0.1.0"
+version = "0.1.1"
 description = "macOS menu bar widget for Codex weekly limit burn rate."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,6 +28,7 @@ dependencies = []
 [project.optional-dependencies]
 app = [
     "pyobjc-framework-Cocoa>=12.1; sys_platform == 'darwin'",
+    "py2app>=0.28.9; sys_platform == 'darwin'",
 ]
 packaging = [
     "pyobjc-framework-Cocoa>=12.1; sys_platform == 'darwin'",
@@ -36,6 +37,7 @@ packaging = [
 
 [project.scripts]
 codex-limit = "codex_limit.__main__:main"
+codex-limit-install = "codex_limit.install:main"
 
 [project.urls]
 Homepage = "https://github.com/yieldthought/codex-limit"
@@ -44,3 +46,6 @@ Issues = "https://github.com/yieldthought/codex-limit/issues"
 
 [tool.setuptools.packages.find]
 include = ["codex_limit*"]
+
+[tool.setuptools.package-data]
+codex_limit = ["assets/CodexLimit.icns"]

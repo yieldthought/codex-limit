@@ -2,4 +2,5 @@ include CodexLimit.py
 include setup.py
 include assets/CodexLimit.icns
 include assets/CodexLimitIcon.png
+include codex_limit/assets/CodexLimit.icns
 include scripts/install.sh

@@ -22,6 +22,15 @@ python -m pip install -e ".[packaging]"
 
 ```bash
 pip install "codex-limit[app]"
+codex-limit-install --user
+```
+
+That builds `CodexLimit.app`, installs it to `~/Applications`, and launches it.
+Use `codex-limit-install --system` to install to `/Applications`.
+
+You can also run it directly as a Python menu-bar process:
+
+```bash
 codex-limit
 ```
 
