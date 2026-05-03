@@ -58,12 +58,12 @@ class CodexLimitMonitor:
         self.history_store.save(samples)
         self._last_reset_end = current.resets_at
 
-        burn_rate = calculate_burn_rate(samples, current=samples[-1] if samples else current)
+        display_current = samples[-1] if samples else current
+        burn_rate = calculate_burn_rate(samples, current=display_current)
         title = format_multiple(burn_rate.multiple)
         eta_text = format_eta(burn_rate.eta_minutes)
         error = None
-        if current.resets_at < now:
+        if display_current.resets_at < now:
             error = "Latest Codex limit sample is from a completed reset window."
 
-        return DisplayState(samples, current, burn_rate, title, eta_text, error, now)
-
+        return DisplayState(samples, display_current, burn_rate, title, eta_text, error, now)

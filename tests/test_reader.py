@@ -6,6 +6,7 @@ from pathlib import Path
 from codex_limit.reader import (
     collect_current_window_samples,
     latest_snapshot,
+    recent_session_files,
     sample_from_json_line,
 )
 
@@ -124,7 +125,59 @@ class ReaderTests(unittest.TestCase):
             samples = collect_current_window_samples(root, latest=latest)
             self.assertEqual([sample.used_percent for sample in samples], [4, 6])
 
+    def test_latest_snapshot_scans_past_newer_file_with_stale_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            root.mkdir(exist_ok=True)
+            stale = root / "stale.jsonl"
+            fresh = root / "fresh.jsonl"
+            stale.write_text(
+                event(
+                    {
+                        "limit_id": "codex",
+                        "secondary": {
+                            "used_percent": 48,
+                            "window_minutes": 10080,
+                            "resets_at": 604800,
+                        },
+                    },
+                    timestamp="1970-01-02T00:00:00Z",
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            fresh.write_text(
+                event(
+                    {
+                        "limit_id": "codex",
+                        "secondary": {
+                            "used_percent": 50,
+                            "window_minutes": 10080,
+                            "resets_at": 604800,
+                        },
+                    },
+                    timestamp="1970-01-02T00:01:00Z",
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stale.touch()
+            latest = latest_snapshot(root)
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest.used_percent, 50)
+
+    def test_recent_session_files_limits_large_log_trees(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = []
+            for index in range(250):
+                path = root / f"{index:03d}.jsonl"
+                path.write_text("", encoding="utf-8")
+                files.append(path)
+            for index, path in enumerate(files):
+                path.touch()
+            self.assertLessEqual(len(recent_session_files(root)), 200)
+
 
 if __name__ == "__main__":
     unittest.main()
-

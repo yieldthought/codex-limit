@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 
 from .models import QuotaSample
@@ -68,5 +69,18 @@ def merge_and_trim_samples(
     for sample in [*existing, *incoming]:
         if reset_start <= sample.observed_at <= reset_end:
             merged[int(round(sample.observed_at * 1000))] = sample
-    return sorted(merged.values(), key=lambda sample: sample.observed_at)
+    return _monotonic_used_percent(
+        sorted(merged.values(), key=lambda sample: sample.observed_at)
+    )
 
+
+def _monotonic_used_percent(samples: list[QuotaSample]) -> list[QuotaSample]:
+    normalized = []
+    highest_used = 0.0
+    for sample in samples:
+        if sample.used_percent < highest_used:
+            sample = replace(sample, used_percent=highest_used)
+        else:
+            highest_used = sample.used_percent
+        normalized.append(sample)
+    return normalized

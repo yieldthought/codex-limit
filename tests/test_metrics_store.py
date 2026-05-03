@@ -58,6 +58,15 @@ class MetricsStoreTests(unittest.TestCase):
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0].used_percent, 4)
 
+    def test_merge_keeps_usage_monotonic_with_stale_parallel_samples(self):
+        merged = merge_and_trim_samples(
+            [],
+            [sample(100, 48), sample(120, 50), sample(140, 48)],
+            reset_start=0,
+            reset_end=100000,
+        )
+        self.assertEqual([sample.used_percent for sample in merged], [48, 50, 50])
+
     def test_history_store_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "samples.jsonl"
@@ -69,4 +78,3 @@ class MetricsStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

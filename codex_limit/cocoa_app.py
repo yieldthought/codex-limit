@@ -322,6 +322,8 @@ class AppDelegate(NSObject):
             self.popover = None
             self.dashboard_view = None
             self.timer = None
+            self.latest_state = None
+            self.refreshing = False
         return self
 
     def applicationDidFinishLaunching_(self, notification):
@@ -365,7 +367,8 @@ class AppDelegate(NSObject):
         if self.popover.isShown():
             self.popover.performClose_(sender)
             return
-        self.refresh_(None)
+        if self.latest_state is not None:
+            self.dashboard_view.setState_(self.latest_state)
         self.popover.showRelativeToRect_ofView_preferredEdge_(
             sender.bounds(),
             sender,
@@ -373,6 +376,9 @@ class AppDelegate(NSObject):
         )
 
     def refresh_(self, timer):
+        if self.refreshing:
+            return
+        self.refreshing = True
         try:
             state = self.monitor.refresh(backfill=False)
         except Exception as exc:
@@ -385,6 +391,9 @@ class AppDelegate(NSObject):
                 f"Refresh failed: {exc}",
                 0.0,
             )
+        finally:
+            self.refreshing = False
+        self.latest_state = state
         if self.status_item is not None:
             self.status_item.button().setTitle_(state.title)
         if self.dashboard_view is not None:

@@ -11,6 +11,8 @@ from .models import QuotaSample
 
 
 SESSION_GLOB = "*.jsonl"
+RECENT_FILE_LIMIT = 200
+RECENT_FILE_SECONDS = 2 * 86400
 
 
 def codex_sessions_dir() -> Path:
@@ -28,12 +30,24 @@ def session_files(sessions_dir: Path | None = None) -> list[Path]:
     )
 
 
+def recent_session_files(sessions_dir: Path | None = None) -> list[Path]:
+    files = session_files(sessions_dir)
+    if not files:
+        return []
+    cutoff = time.time() - RECENT_FILE_SECONDS
+    recent = [path for path in files if _safe_mtime(path) >= cutoff]
+    if recent:
+        return recent[:RECENT_FILE_LIMIT]
+    return files[:RECENT_FILE_LIMIT]
+
+
 def latest_snapshot(sessions_dir: Path | None = None) -> QuotaSample | None:
-    for path in session_files(sessions_dir):
-        snapshots = list(snapshots_from_file(path))
-        if snapshots:
-            return max(snapshots, key=lambda sample: sample.observed_at)
-    return None
+    latest: QuotaSample | None = None
+    for path in recent_session_files(sessions_dir):
+        for sample in snapshots_from_file(path):
+            if latest is None or sample.observed_at > latest.observed_at:
+                latest = sample
+    return latest
 
 
 def collect_current_window_samples(
