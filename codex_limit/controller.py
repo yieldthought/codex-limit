@@ -10,6 +10,9 @@ from .reader import collect_current_window_samples, latest_snapshot
 from .store import HistoryStore, merge_and_trim_samples
 
 
+HISTORY_RESET_DROP_PERCENT = 20.0
+
+
 @dataclass(frozen=True)
 class DisplayState:
     samples: list[QuotaSample]
@@ -43,8 +46,11 @@ class CodexLimitMonitor:
             self._last_reset_end - current.resets_at
         ) > 300
         existing = self.history_store.load()
+        history_conflicts = _history_conflicts_with_current(existing, current)
+        if history_conflicts:
+            existing = []
         incoming = [current]
-        if backfill or reset_changed:
+        if backfill or reset_changed or history_conflicts:
             incoming.extend(
                 collect_current_window_samples(self.sessions_dir, latest=current)
             )
@@ -67,3 +73,20 @@ class CodexLimitMonitor:
             error = "Latest Codex limit sample is from a completed reset window."
 
         return DisplayState(samples, display_current, burn_rate, title, eta_text, error, now)
+
+
+def _history_conflicts_with_current(
+    existing: list[QuotaSample],
+    current: QuotaSample,
+) -> bool:
+    current_window = [
+        sample
+        for sample in existing
+        if current.reset_start <= sample.observed_at <= current.resets_at
+        and abs(sample.resets_at - current.resets_at) <= 300
+        and abs(sample.window_minutes - current.window_minutes) < 1
+    ]
+    if not current_window:
+        return False
+    highest = max(sample.used_percent for sample in current_window)
+    return highest - current.used_percent >= HISTORY_RESET_DROP_PERCENT
