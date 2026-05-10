@@ -44,6 +44,14 @@ Click the menu bar title to open the graph popover. The title is the current
 burn multiple, where `1.0x` means weekly quota is being consumed at the
 real-time replenishment pace.
 
+The burn multiple averages weekly-limit usage over the shorter of the last two
+hours or the current 5% burst. A large single update uses the full observed
+jump over the time since the previous sample, capped at two hours, so bursts are
+visible without letting old activity keep the title artificially high.
+If Codex has not written a newer rate-limit event by the next poll, CodexLimit
+records a flat sample at the poll time with the same usage percent so idle time
+counts as no additional usage.
+
 ## Build a macOS App Bundle
 
 ```bash

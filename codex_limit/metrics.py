@@ -20,9 +20,8 @@ def calculate_burn_rate(
     samples: list[QuotaSample],
     *,
     current: QuotaSample | None = None,
-    lookback_minutes: float = 360.0,
-    min_elapsed_minutes: float = 60.0,
-    min_delta_percent: float = 2.0,
+    lookback_minutes: float = 120.0,
+    burst_delta_percent: float = 5.0,
 ) -> BurnRate:
     ordered = sorted(samples, key=lambda sample: sample.observed_at)
     if current is None:
@@ -30,18 +29,19 @@ def calculate_burn_rate(
     if current is None or current.window_minutes <= 0:
         return BurnRate(0.0, 0.0, None, current)
 
-    baseline = _baseline_for_threshold(
+    baseline = _adaptive_baseline(
         ordered,
         current=current,
-        threshold=min_delta_percent,
         lookback_minutes=lookback_minutes,
-        min_elapsed_minutes=min_elapsed_minutes,
+        burst_delta_percent=burst_delta_percent,
     )
     if baseline is None:
         return BurnRate(0.0, 0.0, None, current)
 
     elapsed_minutes = (current.observed_at - baseline.observed_at) / 60.0
     consumed_percent = current.used_percent - baseline.used_percent
+    if elapsed_minutes <= 0 or consumed_percent <= 0:
+        return BurnRate(0.0, 0.0, None, current, baseline=baseline)
     percent_per_minute = consumed_percent / elapsed_minutes
     real_time_percent_per_minute = 100.0 / current.window_minutes
     multiple = percent_per_minute / real_time_percent_per_minute
@@ -56,7 +56,7 @@ def calculate_burn_rate(
         eta_minutes,
         current,
         baseline=baseline,
-        threshold_percent=min_delta_percent,
+        threshold_percent=burst_delta_percent,
     )
 
 
@@ -76,23 +76,78 @@ def format_eta(minutes: float | None) -> str:
     return f"{hours}h {mins}m"
 
 
-def _baseline_for_threshold(
+def _adaptive_baseline(
     samples: list[QuotaSample],
     *,
     current: QuotaSample,
-    threshold: float,
     lookback_minutes: float,
-    min_elapsed_minutes: float,
+    burst_delta_percent: float,
 ) -> QuotaSample | None:
-    earliest = current.observed_at - lookback_minutes * 60.0
     candidates = [
         sample
         for sample in samples
-        if earliest <= sample.observed_at < current.observed_at
-        and current.used_percent - sample.used_percent >= threshold
-        and current.observed_at - sample.observed_at >= min_elapsed_minutes * 60.0
-        and abs(sample.resets_at - current.resets_at) <= 300
+        if sample.observed_at < current.observed_at and _same_window(sample, current)
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda sample: sample.observed_at)
+
+    baselines = [
+        baseline
+        for baseline in (
+            _lookback_baseline(candidates, current, lookback_minutes),
+            _burst_baseline(candidates, current, burst_delta_percent),
+        )
+        if baseline is not None
+    ]
+    if not baselines:
+        return None
+    return max(baselines, key=lambda sample: sample.observed_at)
+
+
+def _lookback_baseline(
+    samples: list[QuotaSample],
+    current: QuotaSample,
+    lookback_minutes: float,
+) -> QuotaSample | None:
+    target = max(current.reset_start, current.observed_at - lookback_minutes * 60.0)
+    previous = [
+        sample
+        for sample in samples
+        if sample.observed_at <= target
+    ]
+    if previous:
+        sample = previous[-1]
+        if sample.observed_at < target:
+            return QuotaSample(
+                observed_at=target,
+                used_percent=sample.used_percent,
+                window_minutes=current.window_minutes,
+                resets_at=current.resets_at,
+                limit_id=sample.limit_id,
+                limit_name=sample.limit_name,
+                source_path=sample.source_path,
+            )
+        return sample
+    return samples[0]
+
+
+def _burst_baseline(
+    samples: list[QuotaSample],
+    current: QuotaSample,
+    burst_delta_percent: float,
+) -> QuotaSample | None:
+    threshold = current.used_percent - burst_delta_percent
+    if threshold <= 0:
+        return None
+    for sample in reversed(samples):
+        if sample.used_percent <= threshold:
+            return sample
+    return None
+
+
+def _same_window(sample: QuotaSample, current: QuotaSample) -> bool:
+    return (
+        abs(sample.resets_at - current.resets_at) <= 300
+        and abs(sample.window_minutes - current.window_minutes) < 1
+        and current.reset_start <= sample.observed_at <= current.resets_at
+    )

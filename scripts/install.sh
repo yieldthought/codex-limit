@@ -132,7 +132,7 @@ touch "$TARGET_APP"
 
 if [[ "$OPEN_AFTER_INSTALL" -eq 1 ]]; then
   echo "Launching $TARGET_APP..."
-  open "$TARGET_APP"
+  open -n "$TARGET_APP"
 fi
 
 echo "Installed $TARGET_APP"

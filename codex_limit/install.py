@@ -61,7 +61,7 @@ def install_app(args: argparse.Namespace) -> Path:
 
         if not args.no_open:
             print(f"Launching {target_app}...")
-            subprocess.run(["open", str(target_app)], check=False)
+            subprocess.run(["open", "-n", str(target_app)], check=False)
 
         print(f"Installed {target_app}")
         return target_app

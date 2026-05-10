@@ -18,35 +18,43 @@ def sample(observed_at, used, resets_at=100000, window=10080):
 
 
 class MetricsStoreTests(unittest.TestCase):
-    def test_burn_rate_prefers_two_percent_delta(self):
+    def test_burn_rate_uses_two_hour_window(self):
         current = sample(10_000, 12)
-        baseline = sample(10_000 - 60 * 60, 10)
-        rate = calculate_burn_rate([baseline, current])
-        self.assertAlmostEqual(rate.multiple, 3.4, places=1)
-        self.assertEqual(rate.threshold_percent, 2.0)
-        self.assertEqual(format_multiple(rate.multiple), "3.4x")
+        baseline = sample(10_000 - 120 * 60, 10)
+        older = sample(10_000 - 6 * 60 * 60, 6)
+        rate = calculate_burn_rate([older, baseline, current])
+        self.assertEqual(rate.baseline, baseline)
+        self.assertAlmostEqual(rate.multiple, 1.7, places=1)
+        self.assertEqual(format_multiple(rate.multiple), "1.7x")
 
-    def test_burn_rate_requires_two_percent_delta(self):
+    def test_burn_rate_tracks_sub_two_percent_over_two_hours(self):
         current = sample(10_000, 11)
-        baseline = sample(10_000 - 201.6 * 60, 10)
+        baseline = sample(10_000 - 120 * 60, 10)
         rate = calculate_burn_rate([baseline, current])
-        self.assertEqual(rate.multiple, 0.0)
-        self.assertIsNone(rate.threshold_percent)
+        self.assertAlmostEqual(rate.multiple, 0.8, places=1)
 
-    def test_burn_rate_uses_most_recent_baseline_at_least_one_hour_old(self):
-        current = sample(10_000, 14)
-        old = sample(10_000 - 5 * 60 * 60, 10)
-        recent = sample(10_000 - 75 * 60, 12)
-        too_recent = sample(10_000 - 45 * 60, 11)
-        rate = calculate_burn_rate([old, recent, too_recent, current])
-        self.assertEqual(rate.baseline, recent)
+    def test_burn_rate_prefers_shorter_five_percent_burst_window(self):
+        current = sample(10_000, 20)
+        lookback = sample(10_000 - 120 * 60, 10)
+        burst = sample(10_000 - 30 * 60, 15)
+        rate = calculate_burn_rate([lookback, burst, current])
+        self.assertEqual(rate.baseline, burst)
+        self.assertAlmostEqual(rate.multiple, 16.8, places=1)
 
-    def test_burn_rate_requires_minimum_elapsed_time(self):
-        current = sample(10_000, 14)
-        baseline = sample(10_000 - 45 * 60, 11)
-        rate = calculate_burn_rate([baseline, current])
-        self.assertEqual(rate.multiple, 0.0)
-        self.assertIsNone(rate.baseline)
+    def test_burn_rate_uses_full_single_jump_delta(self):
+        current = sample(10_000, 46)
+        previous = sample(10_000 - 20 * 60, 37)
+        rate = calculate_burn_rate([previous, current])
+        self.assertEqual(rate.baseline, previous)
+        self.assertAlmostEqual(rate.multiple, 45.4, places=1)
+
+    def test_burn_rate_caps_stale_single_jump_at_two_hours(self):
+        current = sample(10_000, 46)
+        previous = sample(10_000 - 5 * 60 * 60, 37)
+        rate = calculate_burn_rate([previous, current])
+        self.assertEqual(rate.baseline.observed_at, 10_000 - 120 * 60)
+        self.assertEqual(rate.baseline.used_percent, 37)
+        self.assertAlmostEqual(rate.multiple, 7.6, places=1)
 
     def test_burn_rate_zero_when_no_positive_delta(self):
         rate = calculate_burn_rate([sample(100, 10), sample(200, 10)])

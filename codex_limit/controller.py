@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .metrics import BurnRate, calculate_burn_rate, format_eta, format_multiple
@@ -36,12 +36,13 @@ class CodexLimitMonitor:
         self._last_reset_end: float | None = None
 
     def refresh(self, *, backfill: bool = False) -> DisplayState:
-        current = latest_snapshot(self.sessions_dir)
+        latest = latest_snapshot(self.sessions_dir)
         now = time.time()
-        if current is None:
+        if latest is None:
             burn_rate = BurnRate(0.0, 0.0, None, None)
             return DisplayState([], None, burn_rate, "--", "unknown", "No Codex rate-limit logs found.", now)
 
+        current = _assume_no_usage_until_now(latest, now)
         reset_changed = self._last_reset_end is None or abs(
             self._last_reset_end - current.resets_at
         ) > 300
@@ -49,10 +50,12 @@ class CodexLimitMonitor:
         history_conflicts = _history_conflicts_with_current(existing, current)
         if history_conflicts:
             existing = []
-        incoming = [current]
+        incoming = [latest]
+        if current.observed_at != latest.observed_at:
+            incoming.append(current)
         if backfill or reset_changed or history_conflicts:
             incoming.extend(
-                collect_current_window_samples(self.sessions_dir, latest=current)
+                collect_current_window_samples(self.sessions_dir, latest=latest)
             )
 
         samples = merge_and_trim_samples(
@@ -73,6 +76,12 @@ class CodexLimitMonitor:
             error = "Latest Codex limit sample is from a completed reset window."
 
         return DisplayState(samples, display_current, burn_rate, title, eta_text, error, now)
+
+
+def _assume_no_usage_until_now(sample: QuotaSample, now: float) -> QuotaSample:
+    if sample.observed_at >= now or now >= sample.resets_at:
+        return sample
+    return replace(sample, observed_at=now)
 
 
 def _history_conflicts_with_current(
