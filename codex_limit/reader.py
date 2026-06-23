@@ -13,6 +13,8 @@ from .models import QuotaSample
 SESSION_GLOB = "*.jsonl"
 RECENT_FILE_LIMIT = 200
 RECENT_FILE_SECONDS = 2 * 86400
+WINDOW_WEEKLY = "weekly"
+WINDOW_FIVE_HOUR = "five_hour"
 
 
 def codex_sessions_dir() -> Path:
@@ -41,10 +43,14 @@ def recent_session_files(sessions_dir: Path | None = None) -> list[Path]:
     return files[:RECENT_FILE_LIMIT]
 
 
-def latest_snapshot(sessions_dir: Path | None = None) -> QuotaSample | None:
+def latest_snapshot(
+    sessions_dir: Path | None = None,
+    *,
+    window_kind: str = WINDOW_WEEKLY,
+) -> QuotaSample | None:
     latest: QuotaSample | None = None
     for path in recent_session_files(sessions_dir):
-        for sample in snapshots_from_file(path):
+        for sample in snapshots_from_file(path, window_kind=window_kind):
             if latest is None or sample.observed_at > latest.observed_at:
                 latest = sample
     return latest
@@ -53,8 +59,10 @@ def latest_snapshot(sessions_dir: Path | None = None) -> QuotaSample | None:
 def collect_current_window_samples(
     sessions_dir: Path | None = None,
     latest: QuotaSample | None = None,
+    *,
+    window_kind: str = WINDOW_WEEKLY,
 ) -> list[QuotaSample]:
-    current = latest or latest_snapshot(sessions_dir)
+    current = latest or latest_snapshot(sessions_dir, window_kind=window_kind)
     if current is None:
         return []
 
@@ -65,7 +73,7 @@ def collect_current_window_samples(
         mtime = _safe_mtime(path)
         if mtime and mtime < reset_start - 86400:
             continue
-        candidates.extend(snapshots_from_file(path))
+        candidates.extend(snapshots_from_file(path, window_kind=window_kind))
     return sorted(
         [
             sample
@@ -77,7 +85,11 @@ def collect_current_window_samples(
     )
 
 
-def snapshots_from_file(path: Path) -> Iterable[QuotaSample]:
+def snapshots_from_file(
+    path: Path,
+    *,
+    window_kind: str = WINDOW_WEEKLY,
+) -> Iterable[QuotaSample]:
     fallback_timestamp = _safe_mtime(path) or time.time()
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -88,6 +100,7 @@ def snapshots_from_file(path: Path) -> Iterable[QuotaSample]:
                     line,
                     source_path=str(path),
                     fallback_timestamp=fallback_timestamp,
+                    window_kind=window_kind,
                 )
                 if sample is not None:
                     yield sample
@@ -100,6 +113,7 @@ def sample_from_json_line(
     *,
     source_path: str | None = None,
     fallback_timestamp: float | None = None,
+    window_kind: str = WINDOW_WEEKLY,
 ) -> QuotaSample | None:
     try:
         event = json.loads(line)
@@ -119,7 +133,7 @@ def sample_from_json_line(
     if observed_at is None:
         observed_at = time.time()
 
-    window = _select_weekly_window(rate_data)
+    window = _select_window(rate_data, window_kind)
     if window is None:
         return None
 
@@ -154,6 +168,12 @@ def _is_codex_limit(rate_data: dict[str, Any]) -> bool:
     return True
 
 
+def _select_window(rate_data: dict[str, Any], window_kind: str) -> dict[str, Any] | None:
+    if window_kind == WINDOW_FIVE_HOUR:
+        return _select_five_hour_window(rate_data)
+    return _select_weekly_window(rate_data)
+
+
 def _select_weekly_window(rate_data: dict[str, Any]) -> dict[str, Any] | None:
     secondary = rate_data.get("secondary")
     if _usable_window(secondary):
@@ -167,6 +187,23 @@ def _select_weekly_window(rate_data: dict[str, Any]) -> dict[str, Any] | None:
     if not windows:
         return None
     return max(windows, key=lambda item: float(item.get("window_minutes") or 0))
+
+
+def _select_five_hour_window(rate_data: dict[str, Any]) -> dict[str, Any] | None:
+    primary = rate_data.get("primary")
+    if _usable_window(primary):
+        return primary
+
+    windows = [
+        value
+        for key, value in rate_data.items()
+        if key in {"primary", "secondary"}
+        and _usable_window(value)
+        and float(value.get("window_minutes") or 0) <= 12 * 60
+    ]
+    if not windows:
+        return None
+    return min(windows, key=lambda item: float(item.get("window_minutes") or 0))
 
 
 def _usable_window(value: Any) -> bool:

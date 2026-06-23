@@ -31,7 +31,8 @@ from AppKit import (
 )
 from Foundation import NSObject, NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer
 
-from .controller import CodexLimitMonitor, DisplayState
+from .controller import CodexLimitMonitor, DisplayState, LimitDisplayState
+from .metrics import BurnRate
 
 
 PADDING = 18
@@ -39,21 +40,23 @@ QUIT_BUTTON_WIDTH = 42
 
 POPOVER_WIDTH = 390
 TITLE_HEIGHT = 26
-SUBTITLE_HEIGHT = 18
-GRAPH_HEIGHT = 90
-ETA_HEIGHT = 18
+SECTION_TITLE_HEIGHT = 22
+STATS_HEIGHT = 18
+GRAPH_HEIGHT = 78
 SAMPLE_HEIGHT = 16
 
-TITLE_TO_SUBTITLE = 8
-SUBTITLE_TO_GRAPH = 12
-GRAPH_TO_ETA = 10
-ETA_TO_SAMPLE = 6
+TITLE_TO_STATS = 6
+STATS_TO_GRAPH = 8
+GRAPH_TO_SECTION = 16
+GRAPH_TO_SAMPLE = 12
 
 TITLE_Y = PADDING
-SUBTITLE_Y = TITLE_Y + TITLE_HEIGHT + TITLE_TO_SUBTITLE
-GRAPH_Y = SUBTITLE_Y + SUBTITLE_HEIGHT + SUBTITLE_TO_GRAPH
-ETA_Y = GRAPH_Y + GRAPH_HEIGHT + GRAPH_TO_ETA
-SAMPLE_Y = ETA_Y + ETA_HEIGHT + ETA_TO_SAMPLE
+WEEKLY_STATS_Y = TITLE_Y + TITLE_HEIGHT + TITLE_TO_STATS
+WEEKLY_GRAPH_Y = WEEKLY_STATS_Y + STATS_HEIGHT + STATS_TO_GRAPH
+FIVE_HOUR_TITLE_Y = WEEKLY_GRAPH_Y + GRAPH_HEIGHT + GRAPH_TO_SECTION
+FIVE_HOUR_STATS_Y = FIVE_HOUR_TITLE_Y + SECTION_TITLE_HEIGHT + TITLE_TO_STATS
+FIVE_HOUR_GRAPH_Y = FIVE_HOUR_STATS_Y + STATS_HEIGHT + STATS_TO_GRAPH
+SAMPLE_Y = FIVE_HOUR_GRAPH_Y + GRAPH_HEIGHT + GRAPH_TO_SAMPLE
 POPOVER_HEIGHT = SAMPLE_Y + SAMPLE_HEIGHT + PADDING
 
 
@@ -80,6 +83,21 @@ class Palette:
             self.graph_border = NSColor.colorWithCalibratedRed_green_blue_alpha_(
                 0.55, 0.72, 0.90, 0.26
             )
+            self.green_graph_fill = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.05, 0.18, 0.13, 0.82
+            )
+            self.green_area_fill = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.14, 0.72, 0.42, 0.30
+            )
+            self.green_data_line = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.34, 0.90, 0.58, 0.96
+            )
+            self.green_ideal_line = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.62, 0.86, 0.72, 0.40
+            )
+            self.green_graph_border = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.55, 0.86, 0.65, 0.25
+            )
         else:
             self.background = NSColor.colorWithCalibratedWhite_alpha_(0.98, 0.96)
             self.primary_text = NSColor.colorWithCalibratedWhite_alpha_(0.06, 0.92)
@@ -100,6 +118,21 @@ class Palette:
             )
             self.graph_border = NSColor.colorWithCalibratedRed_green_blue_alpha_(
                 0.15, 0.30, 0.48, 0.14
+            )
+            self.green_graph_fill = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.87, 0.97, 0.91, 0.74
+            )
+            self.green_area_fill = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.08, 0.62, 0.30, 0.23
+            )
+            self.green_data_line = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.03, 0.48, 0.20, 0.92
+            )
+            self.green_ideal_line = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.20, 0.46, 0.28, 0.36
+            )
+            self.green_graph_border = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0.12, 0.36, 0.20, 0.14
             )
 
 
@@ -139,28 +172,96 @@ class DashboardView(NSView):
             self._draw_text(
                 "No rate-limit samples found yet.",
                 PADDING,
-                SUBTITLE_Y,
+                WEEKLY_STATS_Y,
                 13,
-                SUBTITLE_HEIGHT,
+                STATS_HEIGHT,
                 palette.secondary_text,
             )
             self._draw_quit_button(palette)
             return
 
-        current = state.current
-        title = f"Codex weekly limit: {state.title} burn"
-        subtitle = f"{current.used_percent:.0f}% used, {current.remaining_percent:.0f}% left"
-        self._draw_text(title, PADDING, TITLE_Y, 18, TITLE_HEIGHT, palette.primary_text)
-        self._draw_text(subtitle, PADDING, SUBTITLE_Y, 12, SUBTITLE_HEIGHT, palette.secondary_text)
+        weekly = state.weekly
+        self._draw_text(
+            f"Codex weekly limit: {weekly.title} burn",
+            PADDING,
+            TITLE_Y,
+            18,
+            TITLE_HEIGHT,
+            palette.primary_text,
+        )
+        self._draw_limit_stats(weekly, WEEKLY_STATS_Y, palette)
 
-        graph_rect = NSMakeRect(PADDING, GRAPH_Y, POPOVER_WIDTH - 2 * PADDING, GRAPH_HEIGHT)
-        self._draw_graph(graph_rect, state, palette)
+        weekly_graph_rect = NSMakeRect(
+            PADDING,
+            WEEKLY_GRAPH_Y,
+            POPOVER_WIDTH - 2 * PADDING,
+            GRAPH_HEIGHT,
+        )
+        self._draw_graph(weekly_graph_rect, weekly, palette, accent="blue")
 
-        eta = f"ETA to zero: {state.eta_text}"
-        sample_time = datetime.fromtimestamp(current.observed_at).strftime("%b %-d, %-I:%M %p")
-        self._draw_text(eta, PADDING, ETA_Y, 13, ETA_HEIGHT, palette.secondary_text)
-        footer = state.error or f"Last sample: {sample_time}"
+        five_hour = state.five_hour
+        if five_hour is not None and five_hour.current is not None:
+            five_title = f"5-hour limit: {five_hour.title} burn"
+            self._draw_text(
+                five_title,
+                PADDING,
+                FIVE_HOUR_TITLE_Y,
+                15,
+                SECTION_TITLE_HEIGHT,
+                palette.primary_text,
+            )
+            self._draw_limit_stats(five_hour, FIVE_HOUR_STATS_Y, palette)
+            five_graph_rect = NSMakeRect(
+                PADDING,
+                FIVE_HOUR_GRAPH_Y,
+                POPOVER_WIDTH - 2 * PADDING,
+                GRAPH_HEIGHT,
+            )
+            self._draw_graph(five_graph_rect, five_hour, palette, accent="green")
+        else:
+            self._draw_text(
+                "5-hour limit",
+                PADDING,
+                FIVE_HOUR_TITLE_Y,
+                15,
+                SECTION_TITLE_HEIGHT,
+                palette.primary_text,
+            )
+            self._draw_text(
+                "No 5-hour samples found yet.",
+                PADDING,
+                FIVE_HOUR_STATS_Y,
+                12,
+                STATS_HEIGHT,
+                palette.secondary_text,
+            )
+
+        footer = state.error or f"Last sample: {self._last_sample_text(state)}"
         self._draw_footer(footer, palette)
+
+    def _draw_limit_stats(
+        self,
+        limit: LimitDisplayState,
+        y,
+        palette: Palette,
+    ):
+        current = limit.current
+        if current is None:
+            return
+        text = (
+            f"{current.used_percent:.0f}% used, "
+            f"{current.remaining_percent:.0f}% left ({limit.eta_text})"
+        )
+        self._draw_text(text, PADDING, y, 12, STATS_HEIGHT, palette.secondary_text)
+
+    def _last_sample_text(self, state: DisplayState):
+        candidates = [
+            limit.current
+            for limit in (state.weekly, state.five_hour)
+            if limit is not None and limit.current is not None
+        ]
+        latest = max(candidates, key=lambda sample: sample.observed_at)
+        return datetime.fromtimestamp(latest.observed_at).strftime("%b %-d, %-I:%M %p")
 
     def _draw_footer(self, text, palette: Palette):
         quit_rect = self._draw_quit_button(palette)
@@ -188,13 +289,21 @@ class DashboardView(NSView):
         )
         return quit_rect
 
-    def _draw_graph(self, graph_rect, state: DisplayState, palette: Palette):
-        current = state.current
+    def _draw_graph(
+        self,
+        graph_rect,
+        limit: LimitDisplayState,
+        palette: Palette,
+        *,
+        accent: str,
+    ):
+        current = limit.current
         if current is None:
             return
+        colors = self._graph_colors(palette, accent)
 
         graph_path = NSBezierPath.bezierPathWithRect_(graph_rect)
-        palette.graph_fill.setFill()
+        colors["fill"].setFill()
         graph_path.fill()
 
         reset_start = current.reset_start
@@ -213,12 +322,12 @@ class DashboardView(NSView):
         )
         ideal.setLineWidth_(1.25)
         ideal.setLineDash_count_phase_([4.0, 4.0], 2, 0.0)
-        palette.ideal_line.setStroke()
+        colors["ideal"].setStroke()
         ideal.stroke()
 
         points = [
             self._point_for_sample(sample, graph_rect, reset_start, window_seconds)
-            for sample in state.samples
+            for sample in limit.samples
             if reset_start <= sample.observed_at <= current.resets_at
         ]
         if not points:
@@ -236,7 +345,7 @@ class DashboardView(NSView):
         area.lineToPoint_((visible_last_x, last_y))
         area.lineToPoint_((visible_last_x, plot_bottom))
         area.closePath()
-        palette.area_fill.setFill()
+        colors["area"].setFill()
         area.fill()
 
         line = NSBezierPath.bezierPath()
@@ -245,13 +354,30 @@ class DashboardView(NSView):
             line.lineToPoint_(point)
         line.setLineWidth_(hairline_width)
         line.setLineCapStyle_(NSButtLineCapStyle)
-        palette.data_line.setStroke()
+        colors["line"].setStroke()
         line.stroke()
         NSGraphicsContext.restoreGraphicsState()
 
         graph_path.setLineWidth_(1.0)
-        palette.graph_border.setStroke()
+        colors["border"].setStroke()
         graph_path.stroke()
+
+    def _graph_colors(self, palette: Palette, accent: str):
+        if accent == "green":
+            return {
+                "fill": palette.green_graph_fill,
+                "area": palette.green_area_fill,
+                "line": palette.green_data_line,
+                "ideal": palette.green_ideal_line,
+                "border": palette.green_graph_border,
+            }
+        return {
+            "fill": palette.graph_fill,
+            "area": palette.area_fill,
+            "line": palette.data_line,
+            "ideal": palette.ideal_line,
+            "border": palette.graph_border,
+        }
 
     def _point_for_sample(self, sample, graph_rect, reset_start, window_seconds):
         x_fraction = (sample.observed_at - reset_start) / window_seconds
@@ -382,13 +508,17 @@ class AppDelegate(NSObject):
         try:
             state = self.monitor.refresh(backfill=False)
         except Exception as exc:
-            state = DisplayState(
+            weekly = LimitDisplayState(
                 [],
                 None,
-                None,
+                BurnRate(0.0, 0.0, None, None),
                 "--",
                 "unknown",
                 f"Refresh failed: {exc}",
+            )
+            state = DisplayState(
+                weekly,
+                None,
                 0.0,
             )
         finally:

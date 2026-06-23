@@ -1,13 +1,15 @@
 # CodexLimit
 
-CodexLimit is a macOS menu bar widget that reads local Codex session logs and
-shows the weekly non-Spark Codex limit burn rate as a status item title.
+CodexLimit is a macOS menu bar widget that reads local Codex session logs,
+shows the weekly non-Spark Codex limit burn rate as a status item title, and
+graphs both the weekly and 5-hour limits in the popover.
 
 The app does not call a network API. It reads `CODEX_HOME` or
 `~/.codex/sessions`, records samples in:
 
 ```text
 ~/Library/Application Support/CodexLimit/samples.jsonl
+~/Library/Application Support/CodexLimit/five_hour_samples.jsonl
 ```
 
 ## Install for Development
@@ -41,16 +43,17 @@ python -m codex_limit
 ```
 
 Click the menu bar title to open the graph popover. The title is the current
-burn multiple, where `1.0x` means weekly quota is being consumed at the
-real-time replenishment pace.
+weekly burn multiple, where `1.0x` means weekly quota is being consumed at the
+real-time replenishment pace. The popover shows a blue weekly graph and a green
+5-hour graph, each with current used/left percentages and estimated time to
+zero.
 
 The burn multiple averages weekly-limit usage over the shorter of the last two
-hours or the current 5% burst. A large single update uses the full observed
-jump over the time since the previous sample, capped at two hours, so bursts are
-visible without letting old activity keep the title artificially high.
-If Codex has not written a newer rate-limit event by the next poll, CodexLimit
-records a flat sample at the poll time with the same usage percent so idle time
-counts as no additional usage.
+hours or the current 5% burst. If Codex has not written a newer rate-limit event
+by the next poll, CodexLimit extends the graph with an assumed flat sample so
+idle time counts as no additional usage. Those assumed samples are not persisted
+as real observations and are ignored as lower baselines when a later Codex log
+reveals a percentage jump.
 
 ## Build a macOS App Bundle
 
@@ -81,6 +84,12 @@ python -m unittest discover -s tests
 
 ## Release
 
-Publishing uses the same trusted-publishing workflow as `codexapi`: create a
-GitHub release or push a `v*` tag, and `.github/workflows/publish.yml` builds
-and publishes the package to PyPI.
+Publishing uses the local release flow from this machine:
+
+```bash
+python -m pip install --upgrade build twine
+rm -rf dist build
+python -m build
+python -m twine check dist/*
+python -m twine upload --non-interactive dist/*.tar.gz dist/*.whl
+```

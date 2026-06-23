@@ -87,6 +87,7 @@ def _adaptive_baseline(
         sample
         for sample in samples
         if sample.observed_at < current.observed_at and _same_window(sample, current)
+        and not (sample.assumed and sample.used_percent < current.used_percent)
     ]
     if not candidates:
         return None
@@ -118,6 +119,8 @@ def _lookback_baseline(
     if previous:
         sample = previous[-1]
         if sample.observed_at < target:
+            if sample.used_percent < current.used_percent:
+                return sample
             return QuotaSample(
                 observed_at=target,
                 used_percent=sample.used_percent,
@@ -126,6 +129,7 @@ def _lookback_baseline(
                 limit_id=sample.limit_id,
                 limit_name=sample.limit_name,
                 source_path=sample.source_path,
+                assumed=True,
             )
         return sample
     return samples[0]
@@ -140,7 +144,7 @@ def _burst_baseline(
     if threshold <= 0:
         return None
     for sample in reversed(samples):
-        if sample.used_percent <= threshold:
+        if not sample.assumed and sample.used_percent <= threshold:
             return sample
     return None
 

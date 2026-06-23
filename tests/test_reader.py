@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_limit.reader import (
+    WINDOW_FIVE_HOUR,
     collect_current_window_samples,
     latest_snapshot,
     recent_session_files,
@@ -31,6 +32,20 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(sample.used_percent, 4)
         self.assertEqual(sample.window_minutes, 10080)
         self.assertEqual(sample.resets_at, 100000)
+
+    def test_can_read_five_hour_primary_window(self):
+        line = event(
+            {
+                "limit_id": "codex",
+                "primary": {"used_percent": 17, "window_minutes": 300, "resets_at": 2000},
+                "secondary": {"used_percent": 4, "window_minutes": 10080, "resets_at": 100000},
+            }
+        )
+        sample = sample_from_json_line(line, window_kind=WINDOW_FIVE_HOUR)
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample.used_percent, 17)
+        self.assertEqual(sample.window_minutes, 300)
+        self.assertEqual(sample.resets_at, 2000)
 
     def test_ignores_spark_limit(self):
         line = event(

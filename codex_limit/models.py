@@ -13,6 +13,7 @@ class QuotaSample:
     limit_id: str | None = None
     limit_name: str | None = None
     source_path: str | None = None
+    assumed: bool = False
 
     @property
     def remaining_percent(self) -> float:
@@ -31,6 +32,7 @@ class QuotaSample:
             "limit_id": self.limit_id,
             "limit_name": self.limit_name,
             "source_path": self.source_path,
+            "assumed": self.assumed,
         }
 
     @classmethod
@@ -50,9 +52,9 @@ class QuotaSample:
             limit_id=_optional_str(data.get("limit_id")),
             limit_name=_optional_str(data.get("limit_name")),
             source_path=_optional_str(data.get("source_path")),
+            assumed=bool(data.get("assumed", False)),
         )
 
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
-
