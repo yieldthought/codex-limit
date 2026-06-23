@@ -48,6 +48,10 @@ real-time replenishment pace. The popover shows a blue weekly graph and a green
 5-hour graph, each with current used/left percentages and estimated time to
 zero.
 
+If either tracked limit is projected to hit zero within 30 minutes while its
+reset is still more than 30 minutes away, the menu bar title and that limit's
+ETA show a warning marker.
+
 The burn multiple averages weekly-limit usage over the shorter of the last two
 hours or the current 5% burst. If Codex has not written a newer rate-limit event
 by the next poll, CodexLimit extends the graph with an assumed flat sample so

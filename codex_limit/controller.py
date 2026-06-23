@@ -16,6 +16,8 @@ from .store import FIVE_HOUR_HISTORY_FILE_NAME, HistoryStore, merge_and_trim_sam
 
 
 HISTORY_RESET_DROP_PERCENT = 20.0
+STATUS_WARNING_ICON = "⚠️"
+STATUS_WARNING_THRESHOLD_MINUTES = 30.0
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,13 @@ class LimitDisplayState:
     title: str
     eta_text: str
     error: str | None
+    warns_before_refresh: bool = False
+
+    @property
+    def usage_eta_text(self) -> str:
+        if self.warns_before_refresh:
+            return f"{STATUS_WARNING_ICON} {self.eta_text}"
+        return self.eta_text
 
 
 @dataclass(frozen=True)
@@ -51,12 +60,25 @@ class DisplayState:
         return self.weekly.title
 
     @property
+    def status_title(self) -> str:
+        if self._should_warn_status_title():
+            return f"{STATUS_WARNING_ICON} {self.title}"
+        return self.title
+
+    @property
     def eta_text(self) -> str:
         return self.weekly.eta_text
 
     @property
     def error(self) -> str | None:
         return self.weekly.error
+
+    def _should_warn_status_title(self) -> bool:
+        return any(
+            limit.warns_before_refresh
+            for limit in (self.weekly, self.five_hour)
+            if limit is not None
+        )
 
 
 class CodexLimitMonitor:
@@ -159,6 +181,11 @@ class CodexLimitMonitor:
         burn_rate = calculate_burn_rate(display_samples, current=display_current)
         title = format_multiple(burn_rate.multiple)
         eta_text = format_eta(burn_rate.eta_minutes)
+        warns_before_refresh = _limit_runs_out_before_refresh(
+            current=display_current,
+            eta_minutes=burn_rate.eta_minutes,
+            now=now,
+        )
         error = None
         if display_current.resets_at < now:
             error = "Latest Codex limit sample is from a completed reset window."
@@ -170,6 +197,7 @@ class CodexLimitMonitor:
             title,
             eta_text,
             error,
+            warns_before_refresh=warns_before_refresh,
         )
 
 
@@ -194,3 +222,18 @@ def _history_conflicts_with_current(
         return False
     highest = max(sample.used_percent for sample in current_window)
     return highest - current.used_percent >= HISTORY_RESET_DROP_PERCENT
+
+
+def _limit_runs_out_before_refresh(
+    *,
+    current: QuotaSample | None,
+    eta_minutes: float | None,
+    now: float,
+) -> bool:
+    if current is None or eta_minutes is None:
+        return False
+    minutes_to_reset = (current.resets_at - now) / 60.0
+    return (
+        0 < eta_minutes < STATUS_WARNING_THRESHOLD_MINUTES
+        and minutes_to_reset > STATUS_WARNING_THRESHOLD_MINUTES
+    )

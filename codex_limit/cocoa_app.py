@@ -250,7 +250,7 @@ class DashboardView(NSView):
             return
         text = (
             f"{current.used_percent:.0f}% used, "
-            f"{current.remaining_percent:.0f}% left ({limit.eta_text})"
+            f"{current.remaining_percent:.0f}% left ({limit.usage_eta_text})"
         )
         self._draw_text(text, PADDING, y, 12, STATS_HEIGHT, palette.secondary_text)
 
@@ -525,7 +525,7 @@ class AppDelegate(NSObject):
             self.refreshing = False
         self.latest_state = state
         if self.status_item is not None:
-            self.status_item.button().setTitle_(state.title)
+            self.status_item.button().setTitle_(state.status_title)
         if self.dashboard_view is not None:
             self.dashboard_view.setState_(state)
 

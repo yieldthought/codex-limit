@@ -5,7 +5,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from codex_limit.controller import CodexLimitMonitor
+from codex_limit.controller import (
+    CodexLimitMonitor,
+    DisplayState,
+    LimitDisplayState,
+    STATUS_WARNING_ICON,
+)
+from codex_limit.metrics import BurnRate
 from codex_limit.models import QuotaSample
 from codex_limit.store import HistoryStore
 
@@ -94,6 +100,7 @@ class ControllerTests(unittest.TestCase):
 
             self.assertEqual(state.current.observed_at, now)
             self.assertEqual(state.current.used_percent, 10)
+            self.assertEqual(state.status_title, state.title)
             self.assertTrue(state.current.assumed)
             self.assertIn(raw_time, [sample.observed_at for sample in state.samples])
             self.assertIn(now, [sample.observed_at for sample in state.samples])
@@ -169,6 +176,98 @@ class ControllerTests(unittest.TestCase):
                 ).refresh()
 
             self.assertAlmostEqual(state.burn_rate.multiple, 3.4, places=1)
+
+    def test_status_title_warns_when_limit_runs_out_before_refresh(self):
+        now = 1777971600
+        current = QuotaSample(
+            observed_at=now,
+            used_percent=95,
+            window_minutes=300,
+            resets_at=now + 60 * 60,
+            limit_id="codex",
+        )
+        burn_rate = BurnRate(
+            multiple=8.0,
+            percent_per_minute=0.25,
+            eta_minutes=20.0,
+            current=current,
+        )
+        limit = LimitDisplayState(
+            [],
+            current,
+            burn_rate,
+            "8.0x",
+            "20m",
+            None,
+            warns_before_refresh=True,
+        )
+        state = DisplayState(limit, None, now)
+
+        self.assertEqual(state.status_title, f"{STATUS_WARNING_ICON} 8.0x")
+        self.assertEqual(limit.usage_eta_text, f"{STATUS_WARNING_ICON} 20m")
+
+    def test_refresh_flags_warning_when_limit_runs_out_before_refresh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sessions = root / "sessions"
+            sessions.mkdir()
+            now = datetime(2026, 5, 7, 10, 0, tzinfo=timezone.utc).timestamp()
+            resets_at = now + 60 * 60
+            log = sessions / "current.jsonl"
+            log.write_text(
+                event(
+                    95,
+                    timestamp="2026-05-07T10:00:00Z",
+                    resets_at=resets_at,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            store = HistoryStore(root / "samples.jsonl")
+            store.save(
+                [
+                    QuotaSample(
+                        observed_at=now - 30 * 60,
+                        used_percent=87.5,
+                        window_minutes=10080,
+                        resets_at=resets_at,
+                        limit_id="codex",
+                    )
+                ]
+            )
+
+            with patch("codex_limit.controller.time.time", return_value=now):
+                state = CodexLimitMonitor(
+                    sessions_dir=sessions,
+                    history_store=store,
+                ).refresh()
+
+            self.assertTrue(state.weekly.warns_before_refresh)
+            self.assertEqual(state.weekly.eta_text, "20m")
+            self.assertEqual(state.weekly.usage_eta_text, f"{STATUS_WARNING_ICON} 20m")
+            self.assertEqual(state.status_title, f"{STATUS_WARNING_ICON} {state.title}")
+
+    def test_status_title_skips_warning_when_refresh_is_soon(self):
+        now = 1777971600
+        current = QuotaSample(
+            observed_at=now,
+            used_percent=95,
+            window_minutes=300,
+            resets_at=now + 20 * 60,
+            limit_id="codex",
+        )
+        burn_rate = BurnRate(
+            multiple=8.0,
+            percent_per_minute=0.25,
+            eta_minutes=20.0,
+            current=current,
+        )
+        limit = LimitDisplayState([], current, burn_rate, "8.0x", "20m", None)
+        state = DisplayState(limit, None, now)
+
+        self.assertEqual(state.status_title, "8.0x")
+        self.assertEqual(limit.usage_eta_text, "20m")
 
 
 if __name__ == "__main__":
