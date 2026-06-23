@@ -7,6 +7,7 @@ from pathlib import Path
 from .metrics import BurnRate, calculate_burn_rate, format_eta, format_multiple
 from .models import QuotaSample
 from .reader import (
+    SessionLogCache,
     WINDOW_FIVE_HOUR,
     WINDOW_WEEKLY,
     collect_current_window_samples,
@@ -98,9 +99,11 @@ class CodexLimitMonitor:
             WINDOW_WEEKLY: None,
             WINDOW_FIVE_HOUR: None,
         }
+        self._session_cache = SessionLogCache()
 
     def refresh(self, *, backfill: bool = False) -> DisplayState:
         now = time.time()
+        self._session_cache.start_poll()
         weekly = self._refresh_limit(
             window_kind=WINDOW_WEEKLY,
             history_store=self.history_store,
@@ -123,7 +126,11 @@ class CodexLimitMonitor:
         backfill: bool,
         now: float,
     ) -> LimitDisplayState:
-        latest = latest_snapshot(self.sessions_dir, window_kind=window_kind)
+        latest = latest_snapshot(
+            self.sessions_dir,
+            window_kind=window_kind,
+            cache=self._session_cache,
+        )
         if latest is None:
             burn_rate = BurnRate(0.0, 0.0, None, None)
             return LimitDisplayState(
@@ -151,6 +158,7 @@ class CodexLimitMonitor:
                     self.sessions_dir,
                     latest=latest,
                     window_kind=window_kind,
+                    cache=self._session_cache,
                 )
             )
 

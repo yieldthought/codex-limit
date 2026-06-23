@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_limit.reader import (
+    SessionLogCache,
     WINDOW_FIVE_HOUR,
     collect_current_window_samples,
     latest_snapshot,
@@ -192,6 +193,98 @@ class ReaderTests(unittest.TestCase):
             for index, path in enumerate(files):
                 path.touch()
             self.assertLessEqual(len(recent_session_files(root)), 200)
+
+    def test_session_log_cache_reads_appended_samples_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "session.jsonl"
+            log.write_text(
+                event(
+                    {
+                        "limit_id": "codex",
+                        "secondary": {
+                            "used_percent": 4,
+                            "window_minutes": 10080,
+                            "resets_at": 604800,
+                        },
+                    },
+                    timestamp="1970-01-02T00:00:00Z",
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            cache = SessionLogCache()
+            self.assertEqual(
+                [sample.used_percent for sample in cache.snapshots_from_file(log)],
+                [4],
+            )
+
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    event(
+                        {
+                            "limit_id": "codex",
+                            "secondary": {
+                                "used_percent": 6,
+                                "window_minutes": 10080,
+                                "resets_at": 604800,
+                            },
+                        },
+                        timestamp="1970-01-02T01:00:00Z",
+                    )
+                    + "\n"
+                )
+
+            self.assertEqual(
+                [sample.used_percent for sample in cache.snapshots_from_file(log)],
+                [4, 6],
+            )
+            self.assertEqual(
+                [sample.used_percent for sample in cache.snapshots_from_file(log)],
+                [4, 6],
+            )
+
+    def test_session_log_cache_finds_new_files_after_poll_reset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old = root / "old.jsonl"
+            new = root / "new.jsonl"
+            old.write_text(
+                event(
+                    {
+                        "limit_id": "codex",
+                        "secondary": {
+                            "used_percent": 4,
+                            "window_minutes": 10080,
+                            "resets_at": 604800,
+                        },
+                    },
+                    timestamp="1970-01-02T00:00:00Z",
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            cache = SessionLogCache()
+            self.assertEqual(latest_snapshot(root, cache=cache).used_percent, 4)
+
+            new.write_text(
+                event(
+                    {
+                        "limit_id": "codex",
+                        "secondary": {
+                            "used_percent": 7,
+                            "window_minutes": 10080,
+                            "resets_at": 604800,
+                        },
+                    },
+                    timestamp="1970-01-02T01:00:00Z",
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            cache.start_poll()
+
+            self.assertEqual(latest_snapshot(root, cache=cache).used_percent, 7)
 
 
 if __name__ == "__main__":

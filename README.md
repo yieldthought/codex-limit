@@ -59,6 +59,11 @@ idle time counts as no additional usage. Those assumed samples are not persisted
 as real observations and are ignored as lower baselines when a later Codex log
 reveals a percentage jump.
 
+CodexLimit keeps an in-process cache of parsed session-log samples. Each poll
+still checks the session tree for new or modified JSONL files, but unchanged
+files are not reparsed and growing files are read only from their appended
+tail.
+
 ## Build a macOS App Bundle
 
 ```bash

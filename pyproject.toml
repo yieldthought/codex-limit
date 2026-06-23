@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-limit"
-version = "0.2.1"
+version = "0.2.2"
 description = "macOS menu bar widget for Codex weekly and 5-hour limit burn rates."
 readme = "README.md"
 requires-python = ">=3.10"

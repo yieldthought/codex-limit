@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -15,14 +16,93 @@ RECENT_FILE_LIMIT = 200
 RECENT_FILE_SECONDS = 2 * 86400
 WINDOW_WEEKLY = "weekly"
 WINDOW_FIVE_HOUR = "five_hour"
+WINDOW_KINDS = (WINDOW_WEEKLY, WINDOW_FIVE_HOUR)
+
+
+@dataclass
+class _CachedSessionFile:
+    mtime: float
+    size: int
+    weekly: list[QuotaSample] = field(default_factory=list)
+    five_hour: list[QuotaSample] = field(default_factory=list)
+
+
+class SessionLogCache:
+    def __init__(self):
+        self._files: dict[Path, _CachedSessionFile] = {}
+        self._session_files_by_root: dict[Path, list[Path]] = {}
+        self._recent_files_by_root: dict[Path, list[Path]] = {}
+
+    def start_poll(self) -> None:
+        self._session_files_by_root.clear()
+        self._recent_files_by_root.clear()
+
+    def session_files(self, sessions_dir: Path | None = None) -> list[Path]:
+        root = _sessions_root(sessions_dir)
+        if root not in self._session_files_by_root:
+            self._session_files_by_root[root] = _session_files_for_root(root)
+        return list(self._session_files_by_root[root])
+
+    def recent_session_files(self, sessions_dir: Path | None = None) -> list[Path]:
+        root = _sessions_root(sessions_dir)
+        if root not in self._recent_files_by_root:
+            self._recent_files_by_root[root] = _recent_files_for_root(
+                self.session_files(root),
+            )
+        return list(self._recent_files_by_root[root])
+
+    def snapshots_from_file(
+        self,
+        path: Path,
+        *,
+        window_kind: str = WINDOW_WEEKLY,
+    ) -> list[QuotaSample]:
+        cached = self._cached_file(path)
+        if window_kind == WINDOW_FIVE_HOUR:
+            return list(cached.five_hour)
+        return list(cached.weekly)
+
+    def _cached_file(self, path: Path) -> _CachedSessionFile:
+        path = Path(path)
+        try:
+            stat = path.stat()
+        except OSError:
+            self._files.pop(path, None)
+            return _CachedSessionFile(0.0, 0)
+
+        previous = self._files.get(path)
+        mtime = stat.st_mtime
+        size = stat.st_size
+        if previous is not None and previous.mtime == mtime and previous.size == size:
+            return previous
+
+        if previous is not None and size > previous.size:
+            cached = _parse_session_file(path, mtime, size, previous=previous)
+        else:
+            cached = _parse_session_file(path, mtime, size)
+        self._files[path] = cached
+        return cached
 
 
 def codex_sessions_dir() -> Path:
     return Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser() / "sessions"
 
 
-def session_files(sessions_dir: Path | None = None) -> list[Path]:
-    root = sessions_dir or codex_sessions_dir()
+def session_files(
+    sessions_dir: Path | None = None,
+    *,
+    cache: SessionLogCache | None = None,
+) -> list[Path]:
+    if cache is not None:
+        return cache.session_files(sessions_dir)
+    return _session_files_for_root(_sessions_root(sessions_dir))
+
+
+def _sessions_root(sessions_dir: Path | None = None) -> Path:
+    return sessions_dir or codex_sessions_dir()
+
+
+def _session_files_for_root(root: Path) -> list[Path]:
     if not root.exists():
         return []
     return sorted(
@@ -32,8 +112,17 @@ def session_files(sessions_dir: Path | None = None) -> list[Path]:
     )
 
 
-def recent_session_files(sessions_dir: Path | None = None) -> list[Path]:
-    files = session_files(sessions_dir)
+def recent_session_files(
+    sessions_dir: Path | None = None,
+    *,
+    cache: SessionLogCache | None = None,
+) -> list[Path]:
+    if cache is not None:
+        return cache.recent_session_files(sessions_dir)
+    return _recent_files_for_root(session_files(sessions_dir))
+
+
+def _recent_files_for_root(files: list[Path]) -> list[Path]:
     if not files:
         return []
     cutoff = time.time() - RECENT_FILE_SECONDS
@@ -47,10 +136,16 @@ def latest_snapshot(
     sessions_dir: Path | None = None,
     *,
     window_kind: str = WINDOW_WEEKLY,
+    cache: SessionLogCache | None = None,
 ) -> QuotaSample | None:
     latest: QuotaSample | None = None
-    for path in recent_session_files(sessions_dir):
-        for sample in snapshots_from_file(path, window_kind=window_kind):
+    for path in recent_session_files(sessions_dir, cache=cache):
+        samples = (
+            cache.snapshots_from_file(path, window_kind=window_kind)
+            if cache is not None
+            else snapshots_from_file(path, window_kind=window_kind)
+        )
+        for sample in samples:
             if latest is None or sample.observed_at > latest.observed_at:
                 latest = sample
     return latest
@@ -61,19 +156,29 @@ def collect_current_window_samples(
     latest: QuotaSample | None = None,
     *,
     window_kind: str = WINDOW_WEEKLY,
+    cache: SessionLogCache | None = None,
 ) -> list[QuotaSample]:
-    current = latest or latest_snapshot(sessions_dir, window_kind=window_kind)
+    current = latest or latest_snapshot(
+        sessions_dir,
+        window_kind=window_kind,
+        cache=cache,
+    )
     if current is None:
         return []
 
     reset_start = current.reset_start
     reset_end = current.resets_at
     candidates = []
-    for path in session_files(sessions_dir):
+    for path in session_files(sessions_dir, cache=cache):
         mtime = _safe_mtime(path)
         if mtime and mtime < reset_start - 86400:
             continue
-        candidates.extend(snapshots_from_file(path, window_kind=window_kind))
+        samples = (
+            cache.snapshots_from_file(path, window_kind=window_kind)
+            if cache is not None
+            else snapshots_from_file(path, window_kind=window_kind)
+        )
+        candidates.extend(samples)
     return sorted(
         [
             sample
@@ -108,6 +213,45 @@ def snapshots_from_file(
         return
 
 
+def _parse_session_file(
+    path: Path,
+    mtime: float,
+    size: int,
+    previous: _CachedSessionFile | None = None,
+) -> _CachedSessionFile:
+    start_offset = previous.size if previous is not None else 0
+    weekly = list(previous.weekly) if previous is not None else []
+    five_hour = list(previous.five_hour) if previous is not None else []
+    fallback_timestamp = mtime or time.time()
+    source_path = str(path)
+    try:
+        with path.open("rb") as handle:
+            handle.seek(start_offset)
+            for line in handle:
+                if b'"rate_limits"' not in line:
+                    continue
+                text = line.decode("utf-8", errors="replace")
+                event = _event_from_json_line(text)
+                if event is None:
+                    continue
+                for window_kind in WINDOW_KINDS:
+                    sample = _sample_from_event(
+                        event,
+                        source_path=source_path,
+                        fallback_timestamp=fallback_timestamp,
+                        window_kind=window_kind,
+                    )
+                    if sample is None:
+                        continue
+                    if window_kind == WINDOW_FIVE_HOUR:
+                        five_hour.append(sample)
+                    else:
+                        weekly.append(sample)
+    except OSError:
+        return previous or _CachedSessionFile(mtime, size)
+    return _CachedSessionFile(mtime, size, weekly, five_hour)
+
+
 def sample_from_json_line(
     line: str,
     *,
@@ -115,13 +259,34 @@ def sample_from_json_line(
     fallback_timestamp: float | None = None,
     window_kind: str = WINDOW_WEEKLY,
 ) -> QuotaSample | None:
+    event = _event_from_json_line(line)
+    if event is None:
+        return None
+    return _sample_from_event(
+        event,
+        source_path=source_path,
+        fallback_timestamp=fallback_timestamp,
+        window_kind=window_kind,
+    )
+
+
+def _event_from_json_line(line: str) -> dict[str, Any] | None:
     try:
         event = json.loads(line)
     except json.JSONDecodeError:
         return None
     if not isinstance(event, dict):
         return None
+    return event
 
+
+def _sample_from_event(
+    event: dict[str, Any],
+    *,
+    source_path: str | None = None,
+    fallback_timestamp: float | None = None,
+    window_kind: str = WINDOW_WEEKLY,
+) -> QuotaSample | None:
     payload = event.get("payload") or {}
     if not isinstance(payload, dict):
         return None
